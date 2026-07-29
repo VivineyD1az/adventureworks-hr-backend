@@ -37,18 +37,19 @@ app.use((req, res) => {
 // Middleware de errores (siempre al final)
 app.use(errorHandler);
 
-const PORT = Number(process.env.PORT) || 4000;
+const HOST = '127.0.0.1';
+const PORT = 3000;
 
-function startServer(port) {
-  const server = app.listen(port, () => {
+function startServer(port, host) {
+  const server = app.listen(port, host, () => {
     const actualPort = server.address().port;
     console.log(`Servidor backend corriendo en http://localhost:${actualPort}`);
   });
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`Puerto ${port} ocupado. Intentando con el puerto ${port + 1}...`);
-      startServer(port + 1);
+      console.error(`El puerto ${port} ya está en uso. Cierra el proceso que lo ocupa o cambia la configuración.`);
+      process.exit(1);
       return;
     }
 
@@ -62,7 +63,7 @@ function startServer(port) {
 getPool()
   .then(async () => {
     await ensureAdventureWorksExtensions();
-    startServer(PORT);
+    startServer(PORT, HOST);
   })
   .catch((err) => {
     console.error('No se pudo iniciar el servidor porque fallo la conexion a la base de datos.');
