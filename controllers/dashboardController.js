@@ -2,7 +2,7 @@ const { sql, getPool } = require('../config/db');
 const asyncHandler = require('../utils/asyncHandler');
 
 // GET /api/dashboard/stats
-// Tarjetas superiores: Total Employees, Vacation Balance, Active Candidates, Shift Changes
+// Tarjetas superiores: Total Empleados, Total Departamentos, Total Turnos, Total Candidatos
 const obtenerEstadisticas = asyncHandler(async (req, res) => {
   const pool = await getPool();
 
@@ -28,6 +28,19 @@ const obtenerEstadisticas = asyncHandler(async (req, res) => {
     WHERE RecruitmentStage NOT IN ('Hired', 'Rejected')
   `);
 
+  // Total de candidatos sin importar la etapa (incluye contratados y rechazados)
+  const totalCandidatos = await pool.request().query(`
+    SELECT COUNT(*) AS total FROM HumanResources.JobCandidate
+  `);
+
+  const totalDepartamentos = await pool.request().query(`
+    SELECT COUNT(*) AS total FROM HumanResources.Department
+  `);
+
+  const totalTurnos = await pool.request().query(`
+    SELECT COUNT(*) AS total FROM HumanResources.Shift
+  `);
+
   // "Shift Changes": usamos como proxy los registros de EmployeeDepartmentHistory
   // creados en los ultimos 7 dias (cambio de departamento/turno)
   const cambiosTurno = await pool.request().query(`
@@ -46,6 +59,9 @@ const obtenerEstadisticas = asyncHandler(async (req, res) => {
         activos: totalEmpleados.recordset[0].activos,
         inactivos: totalEmpleados.recordset[0].inactivos,
       },
+      totalDepartamentos: totalDepartamentos.recordset[0].total,
+      totalTurnos: totalTurnos.recordset[0].total,
+      totalCandidatos: totalCandidatos.recordset[0].total,
       balanceVacacionesPromedioDias: Number(
         (balanceVacaciones.recordset[0].promedioDias || 0).toFixed(1)
       ),
@@ -105,14 +121,57 @@ const contratacionesRecientes = asyncHandler(async (req, res) => {
   const resultado = await pool.request().query(`
     SELECT TOP 5
       e.BusinessEntityID AS idEmpleado,
+      p.FirstName AS nombre,
+      p.LastName AS apellido,
       p.FirstName + ' ' + p.LastName AS nombreCompleto,
       e.JobTitle AS cargo,
+      d.Name AS departamento,
       e.HireDate AS fechaContratacion
     FROM HumanResources.Employee e
     INNER JOIN Person.Person p ON p.BusinessEntityID = e.BusinessEntityID
+    LEFT JOIN HumanResources.EmployeeDepartmentHistory edh
+      ON edh.BusinessEntityID = e.BusinessEntityID AND edh.EndDate IS NULL
+    LEFT JOIN HumanResources.Department d ON d.DepartmentID = edh.DepartmentID
     ORDER BY e.HireDate DESC
   `);
   res.json({ exito: true, datos: resultado.recordset });
+});
+
+// GET /api/dashboard/candidatos-recientes  ("Ultimos Candidatos Registrados")
+const candidatosRecientes = asyncHandler(async (req, res) => {
+  const pool = await getPool();
+  const resultado = await pool.request().query(`
+    SELECT TOP 5
+      jc.JobCandidateID AS idCandidato,
+      COALESCE(jc.CandidateName, p.FirstName + ' ' + p.LastName, 'Candidato sin nombre registrado') AS nombre,
+      jc.AppliedRole AS cargoAplicado,
+      jc.RecruitmentStage AS etapa,
+      CASE WHEN jc.Resume IS NOT NULL THEN 1 ELSE 0 END AS tieneHojaDeVida,
+      jc.ModifiedDate AS fechaRegistro
+    FROM HumanResources.JobCandidate jc
+    LEFT JOIN Person.Person p ON p.BusinessEntityID = jc.BusinessEntityID
+    ORDER BY jc.ModifiedDate DESC
+  `);
+  res.json({ exito: true, datos: resultado.recordset });
+});
+
+// GET /api/dashboard/candidatos/:id/hoja-de-vida  (boton "ver"/"descargar" hoja de vida)
+const hojaDeVidaCandidato = asyncHandler(async (req, res) => {
+  const pool = await getPool();
+  const resultado = await pool
+    .request()
+    .input('id', sql.Int, req.params.id)
+    .query(`
+      SELECT CAST(Resume AS NVARCHAR(MAX)) AS hojaDeVida
+      FROM HumanResources.JobCandidate
+      WHERE JobCandidateID = @id
+    `);
+
+  if (resultado.recordset.length === 0 || !resultado.recordset[0].hojaDeVida) {
+    return res.status(404).json({ exito: false, mensaje: 'Este candidato no tiene hoja de vida registrada' });
+  }
+
+  res.json({ exito: true, datos: { hojaDeVida: resultado.recordset[0].hojaDeVida } });
 });
 
 // GET /api/dashboard/proximos-cumpleanos
@@ -154,5 +213,7 @@ module.exports = {
   distribucionPorGenero,
   distribucionPorEstadoCivil,
   contratacionesRecientes,
+  candidatosRecientes,
+  hojaDeVidaCandidato,
   proximosCumpleanos,
 };
