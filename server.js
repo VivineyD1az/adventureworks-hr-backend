@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const { getPool } = require('./config/db');
+const { getPool, ensureAdventureWorksExtensions } = require('./config/db');
 const errorHandler = require('./middlewares/errorHandler');
 
 const dashboardRoutes = require('./routes/dashboardRoutes');
@@ -10,6 +10,7 @@ const employeeRoutes = require('./routes/employeeRoutes');
 const departmentRoutes = require('./routes/departmentRoutes');
 const shiftRoutes = require('./routes/shiftRoutes');
 const candidateRoutes = require('./routes/candidateRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.get('/api/health', (req, res) => {
   res.json({ exito: true, mensaje: 'API HumanResources - AdventureWorks funcionando correctamente' });
 });
 
+app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/empleados', employeeRoutes);
 app.use('/api/departamentos', departmentRoutes);
@@ -35,14 +37,33 @@ app.use((req, res) => {
 // Middleware de errores (siempre al final)
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 4000;
+const HOST = '127.0.0.1';
+const PORT = 3000;
+
+function startServer(port, host) {
+  const server = app.listen(port, host, () => {
+    const actualPort = server.address().port;
+    console.log(`Servidor backend corriendo en http://localhost:${actualPort}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`El puerto ${port} ya está en uso. Cierra el proceso que lo ocupa o cambia la configuración.`);
+      process.exit(1);
+      return;
+    }
+
+    console.error('No se pudo iniciar el servidor.');
+    console.error(err.message);
+    process.exit(1);
+  });
+}
 
 // Verifica la conexion a la BD antes de levantar el servidor
 getPool()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Servidor backend corriendo en http://localhost:${PORT}`);
-    });
+  .then(async () => {
+    await ensureAdventureWorksExtensions();
+    startServer(PORT, HOST);
   })
   .catch((err) => {
     console.error('No se pudo iniciar el servidor porque fallo la conexion a la base de datos.');

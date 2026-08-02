@@ -40,4 +40,40 @@ function getPool() {
   return poolPromise;
 }
 
-module.exports = { sql, getPool };
+async function ensureAdventureWorksExtensions() {
+  const pool = await getPool();
+
+  await pool.request().query(`
+    IF COL_LENGTH('HumanResources.Employee', 'PasswordHash') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.Employee ADD PasswordHash VARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('HumanResources.Employee', 'MustChangePassword') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.Employee ADD MustChangePassword BIT NOT NULL CONSTRAINT DF_Employee_MustChangePassword DEFAULT 1;
+    END;
+
+    IF COL_LENGTH('HumanResources.Employee', 'AccountLocked') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.Employee ADD AccountLocked BIT NOT NULL CONSTRAINT DF_Employee_AccountLocked DEFAULT 0;
+    END;
+
+    IF COL_LENGTH('HumanResources.JobCandidate', 'RecruitmentStage') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.JobCandidate ADD RecruitmentStage NVARCHAR(20) NOT NULL CONSTRAINT DF_JobCandidate_RecruitmentStage DEFAULT ('Applied');
+    END;
+
+    IF COL_LENGTH('HumanResources.JobCandidate', 'AppliedRole') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.JobCandidate ADD AppliedRole NVARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('HumanResources.JobCandidate', 'Rating') IS NULL
+    BEGIN
+      ALTER TABLE HumanResources.JobCandidate ADD Rating DECIMAL(2,1) NULL;
+    END;
+  `);
+}
+
+module.exports = { sql, getPool, ensureAdventureWorksExtensions };
