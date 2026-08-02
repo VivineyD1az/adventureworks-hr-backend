@@ -5,6 +5,11 @@ const { getPool } = require("../config/db");
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
 const SALT_ROUNDS = 10;
+// Lista de LoginIDs permitidos. Puedes configurar con la variable de entorno
+// ALLOWED_LOGINIDS como una lista separada por comas.
+const ALLOWED_LOGINIDS = (process.env.ALLOWED_LOGINIDS || "adventure-works\\ken0,adventure-works\\terri0")
+  .split(",")
+  .map((s) => s.trim().toLowerCase());
 
 const loginUser = async ({ loginId, password }) => {
   if (!loginId || !password) {
@@ -14,6 +19,18 @@ const loginUser = async ({ loginId, password }) => {
         exito: false,
         datos: null,
         mensaje: "LoginID y contraseña son obligatorios",
+      },
+    };
+  }
+
+  // Restringir acceso solo a los LoginIDs permitidos
+  if (!ALLOWED_LOGINIDS.includes(String(loginId).toLowerCase())) {
+    return {
+      statusCode: 403,
+      body: {
+        exito: false,
+        datos: null,
+        mensaje: "Acceso no permitido",
       },
     };
   }
