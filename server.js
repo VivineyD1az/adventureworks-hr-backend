@@ -37,8 +37,8 @@ app.use((req, res) => {
 // Middleware de errores (siempre al final)
 app.use(errorHandler);
 
-const HOST = '127.0.0.1';
-const PORT = 3000;
+const HOST = '0.0.0.0';
+const PORT = process.env.PORT || 4000;
 
 function startServer(port, host) {
   const server = app.listen(port, host, () => {
