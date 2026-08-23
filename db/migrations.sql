@@ -10,7 +10,7 @@
   usando SSMS o sqlcmd, antes de correr el backend.
 */
 
-USE AdventureWorks2025; -- cambia el nombre si tu base se llama distinto
+USE AdventureWorks2025; 
 GO
 
 IF NOT EXISTS (
@@ -48,6 +48,18 @@ BEGIN
     -- Calificacion mostrada en las tarjetas del mockup (ej. 4.8, 4.2)
     ALTER TABLE HumanResources.JobCandidate
     ADD Rating DECIMAL(2,1) NULL;
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = 'UX_EmployeeDepartmentHistory_Active'
+      AND object_id = OBJECT_ID('HumanResources.EmployeeDepartmentHistory')
+)
+BEGIN
+    CREATE UNIQUE INDEX UX_EmployeeDepartmentHistory_Active
+    ON HumanResources.EmployeeDepartmentHistory (BusinessEntityID)
+    WHERE EndDate IS NULL;
 END
 GO
 

@@ -25,7 +25,7 @@ Edita `.env` con tus datos reales (servidor, base de datos, usuario y contraseñ
 
 ## 4. Ejecutar la migración obligatoria
 
-Antes de correr el backend, ejecuta **una sola vez** el script `db/migrations.sql` en SSMS (o `sqlcmd`) contra tu base de datos. Este script agrega las columnas necesarias para el pipeline de reclutamiento (`RecruitmentStage`, `AppliedRole`, `Rating`) que el diseño requiere pero que no existen en el AdventureWorks original.
+Antes de correr el backend, ejecuta **una sola vez** el script `db/migrations.sql` en SSMS (o `sqlcmd`) contra tu base de datos. Este script agrega las columnas necesarias para el pipeline de reclutamiento (`RecruitmentStage`, `AppliedRole`, `Rating`) y crea una restricción para impedir que un empleado tenga más de una asignación activa.
 
 ## 5. Levantar el servidor
 
@@ -84,9 +84,13 @@ backend/
 | GET | `/api/departamentos` | Agrupados por división, con headcount y presupuesto estimado |
 | GET | `/api/departamentos/:id` | Detalle |
 | GET | `/api/departamentos/:id/empleados` | Empleados asignados |
-| POST | `/api/departamentos/:id/asignaciones` | Reasignar un empleado (Manage Assignments) |
+| POST | `/api/departamentos/:id/asignaciones` | Asignar/reasignar empleado; cierra automáticamente su asignación anterior |
+| PUT | `/api/departamentos/:id/asignaciones/:idEmpleado` | Editar turno o fechas de una asignación activa |
+| DELETE | `/api/departamentos/:id/asignaciones/:idEmpleado` | Cerrar una asignación activa |
 | POST / PUT / DELETE | `/api/departamentos` | CRUD |
 | GET / POST / PUT / DELETE | `/api/turnos` | CRUD de turnos |
+
+La asignación recibe `{ "idEmpleado": 1, "idTurno": 2, "fechaInicio": "2026-08-23", "fechaFin": null }`. El `:id` de la ruta es el departamento nuevo. Las fechas son opcionales y usan `YYYY-MM-DD`; `fechaFin: null` mantiene la asignación activa. La operación valida las entidades, cierra la asignación vigente (`EndDate`) e inserta la nueva dentro de una sola transacción.
 
 ### Reclutamiento
 | Método | Ruta | Descripción |
