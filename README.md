@@ -43,6 +43,10 @@ Servidor backend corriendo en http://localhost:4000
 
 Prueba con: `GET http://localhost:4000/api/health`
 
+### Autenticación
+
+El login acepta el usuario corto, por ejemplo `{ "loginId": "ken0", "password": "..." }`, aunque AdventureWorks almacene `adventure-works\\ken0`. También se acepta el LoginID completo. Los usuarios permitidos se configuran opcionalmente con `ALLOWED_LOGINIDS=ken0,terri0` en `.env`.
+
 ## 6. Estructura del proyecto
 
 ```

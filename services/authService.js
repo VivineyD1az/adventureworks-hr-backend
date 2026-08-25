@@ -5,11 +5,18 @@ const { getPool } = require("../config/db");
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
 const SALT_ROUNDS = 10;
+
+const obtenerLoginCorto = (loginId) => {
+  const valor = String(loginId || "").trim();
+  const separador = valor.lastIndexOf("\\");
+  return (separador >= 0 ? valor.slice(separador + 1) : valor).toLowerCase();
+};
+
 // Lista de LoginIDs permitidos. Puedes configurar con la variable de entorno
 // ALLOWED_LOGINIDS como una lista separada por comas.
-const ALLOWED_LOGINIDS = (process.env.ALLOWED_LOGINIDS || "adventure-works\\ken0,adventure-works\\terri0")
+const ALLOWED_LOGINIDS = (process.env.ALLOWED_LOGINIDS || "ken0,terri0")
   .split(",")
-  .map((s) => s.trim().toLowerCase());
+  .map(obtenerLoginCorto);
 
 const loginUser = async ({ loginId, password }) => {
   if (!loginId || !password) {
@@ -23,8 +30,10 @@ const loginUser = async ({ loginId, password }) => {
     };
   }
 
-  // Restringir acceso solo a los LoginIDs permitidos
-  if (!ALLOWED_LOGINIDS.includes(String(loginId).toLowerCase())) {
+  const loginIdCorto = obtenerLoginCorto(loginId);
+
+  // Restringir acceso solo a los LoginIDs permitidos, sin exigir el dominio.
+  if (!ALLOWED_LOGINIDS.includes(loginIdCorto)) {
     return {
       statusCode: 403,
       body: {
@@ -39,7 +48,7 @@ const loginUser = async ({ loginId, password }) => {
 
   const { recordset } = await pool
     .request()
-    .input("LoginID", loginId)
+    .input("LoginID", loginIdCorto)
     .query(`
       SELECT
         e.BusinessEntityID,
@@ -53,7 +62,13 @@ const loginUser = async ({ loginId, password }) => {
         p.LastName
       FROM HumanResources.Employee e
       INNER JOIN Person.Person p ON p.BusinessEntityID = e.BusinessEntityID
-      WHERE e.LoginID = @LoginID
+      WHERE LOWER(
+        CASE
+          WHEN CHARINDEX('\\', e.LoginID) > 0
+            THEN RIGHT(e.LoginID, LEN(e.LoginID) - CHARINDEX('\\', e.LoginID))
+          ELSE e.LoginID
+        END
+      ) = @LoginID
     `);
 
   const empleado = recordset[0];
@@ -91,7 +106,7 @@ const loginUser = async ({ loginId, password }) => {
   const token = jwt.sign(
     {
       businessEntityId: empleado.BusinessEntityID,
-      loginId: empleado.LoginID,
+      loginId: loginIdCorto,
       jobTitle: empleado.JobTitle,
     },
     JWT_SECRET,
@@ -107,7 +122,7 @@ const loginUser = async ({ loginId, password }) => {
         mustChangePassword: !!empleado.MustChangePassword,
         empleado: {
           businessEntityId: empleado.BusinessEntityID,
-          loginId: empleado.LoginID,
+          loginId: loginIdCorto,
           nombre: `${empleado.FirstName} ${empleado.LastName}`,
           cargo: empleado.JobTitle,
         },
@@ -124,7 +139,16 @@ const getPerfilUsuario = async (businessEntityId) => {
     .request()
     .input("BusinessEntityID", businessEntityId)
     .query(`
-      SELECT e.BusinessEntityID, e.LoginID, e.JobTitle, p.FirstName, p.LastName
+      SELECT
+        e.BusinessEntityID,
+        LOWER(CASE
+          WHEN CHARINDEX('\\', e.LoginID) > 0
+            THEN RIGHT(e.LoginID, LEN(e.LoginID) - CHARINDEX('\\', e.LoginID))
+          ELSE e.LoginID
+        END) AS LoginID,
+        e.JobTitle,
+        p.FirstName,
+        p.LastName
       FROM HumanResources.Employee e
       INNER JOIN Person.Person p ON p.BusinessEntityID = e.BusinessEntityID
       WHERE e.BusinessEntityID = @BusinessEntityID
