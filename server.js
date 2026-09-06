@@ -17,6 +17,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({
+    exito: true,
+    mensaje: 'API HumanResources - AdventureWorks funcionando correctamente',
+    health: '/api/health',
+  });
+});
+
 // Ruta de verificacion rapida (util para probar que el servidor esta arriba)
 app.get('/api/health', (req, res) => {
   res.json({ exito: true, mensaje: 'API HumanResources - AdventureWorks funcionando correctamente' });
