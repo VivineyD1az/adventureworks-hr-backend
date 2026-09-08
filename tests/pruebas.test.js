@@ -14,6 +14,7 @@ jest.mock('../config/db', () => ({
 		SmallInt: 'SmallInt',
 		TinyInt: 'TinyInt',
 		NVarChar: 'NVarChar',
+		VarChar: 'VarChar',
 		Char: jest.fn(() => 'Char'),
 		Bit: 'Bit',
 		Date: 'Date',

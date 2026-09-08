@@ -69,14 +69,14 @@ const actualizarTurno = asyncHandler(async (req, res) => {
     .request()
     .input('id', sql.TinyInt, req.params.id)
     .input('nombre', sql.NVarChar, nombre)
-    .input('horaInicio', sql.Time, horaInicio)
-    .input('horaFin', sql.Time, horaFin)
+    .input('horaInicio', sql.VarChar, horaInicio)
+    .input('horaFin', sql.VarChar, horaFin)
     .query(`
       UPDATE HumanResources.Shift
       SET
         Name = COALESCE(@nombre, Name),
-        StartTime = COALESCE(@horaInicio, StartTime),
-        EndTime = COALESCE(@horaFin, EndTime),
+        StartTime = COALESCE(CONVERT(TIME, @horaInicio), StartTime),
+        EndTime = COALESCE(CONVERT(TIME, @horaFin), EndTime),
         ModifiedDate = GETDATE()
       WHERE ShiftID = @id
     `);
