@@ -1,6 +1,10 @@
 const { sql, getPool } = require('../config/db');
 const asyncHandler = require('../utils/asyncHandler');
 
+function esFechaISOValida(valor) {
+  return !valor || /^\d{4}-\d{2}-\d{2}$/.test(valor);
+}
+
 // GET /api/departamentos
 // Devuelve los departamentos agrupados por GroupName (Executive, Sales & Marketing, etc.)
 // con el conteo de empleados actuales y los turnos activos en ese departamento
@@ -99,8 +103,11 @@ const listarEmpleadosDelDepartamento = asyncHandler(async (req, res) => {
         e.BusinessEntityID AS idEmpleado,
         p.FirstName + ' ' + p.LastName AS nombreCompleto,
         e.JobTitle AS cargo,
+        edh.DepartmentID AS idDepartamento,
+        edh.ShiftID AS idTurno,
         s.Name AS turno,
-        edh.StartDate AS fechaAsignacion
+        edh.StartDate AS fechaInicio,
+        edh.EndDate AS fechaFin
       FROM HumanResources.EmployeeDepartmentHistory edh
       INNER JOIN HumanResources.Employee e ON e.BusinessEntityID = edh.BusinessEntityID
       INNER JOIN Person.Person p ON p.BusinessEntityID = e.BusinessEntityID
@@ -114,24 +121,68 @@ const listarEmpleadosDelDepartamento = asyncHandler(async (req, res) => {
 // POST /api/departamentos/:id/asignaciones
 // Reasigna un empleado a este departamento/turno (cierra la asignacion anterior y crea una nueva)
 const asignarEmpleado = asyncHandler(async (req, res) => {
-  const { idEmpleado, idTurno } = req.body;
+  const { idEmpleado, idTurno, fechaInicio, fechaFin } = req.body;
   const idDepartamento = req.params.id;
 
   if (!idEmpleado || !idTurno) {
     return res.status(400).json({ exito: false, mensaje: 'idEmpleado e idTurno son obligatorios' });
+  }
+  if (!esFechaISOValida(fechaInicio) || !esFechaISOValida(fechaFin)) {
+    return res.status(400).json({ exito: false, mensaje: 'Las fechas deben tener el formato YYYY-MM-DD' });
+  }
+  if (fechaInicio && fechaFin && fechaFin < fechaInicio) {
+    return res.status(400).json({ exito: false, mensaje: 'La fecha de fin no puede ser anterior a la fecha de inicio' });
   }
 
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
 
   try {
-    await transaction.begin();
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+
+    const referencias = await new sql.Request(transaction)
+      .input('idEmpleado', sql.Int, idEmpleado)
+      .input('idDepartamento', sql.SmallInt, idDepartamento)
+      .input('idTurno', sql.TinyInt, idTurno)
+      .query(`
+        SELECT
+          CASE WHEN EXISTS (SELECT 1 FROM HumanResources.Employee WHERE BusinessEntityID = @idEmpleado AND CurrentFlag = 1) THEN 1 ELSE 0 END AS empleadoValido,
+          CASE WHEN EXISTS (SELECT 1 FROM HumanResources.Department WHERE DepartmentID = @idDepartamento) THEN 1 ELSE 0 END AS departamentoValido,
+          CASE WHEN EXISTS (SELECT 1 FROM HumanResources.Shift WHERE ShiftID = @idTurno) THEN 1 ELSE 0 END AS turnoValido,
+          CASE WHEN EXISTS (
+            SELECT 1
+            FROM HumanResources.EmployeeDepartmentHistory
+            WHERE BusinessEntityID = @idEmpleado
+              AND DepartmentID = @idDepartamento
+              AND ShiftID = @idTurno
+              AND EndDate IS NULL
+          ) THEN 1 ELSE 0 END AS asignacionActual
+      `);
+
+    const estado = referencias.recordset[0];
+    if (!estado.empleadoValido) {
+      await transaction.rollback();
+      return res.status(404).json({ exito: false, mensaje: 'Empleado no encontrado o inactivo' });
+    }
+    if (!estado.departamentoValido) {
+      await transaction.rollback();
+      return res.status(404).json({ exito: false, mensaje: 'Departamento no encontrado' });
+    }
+    if (!estado.turnoValido) {
+      await transaction.rollback();
+      return res.status(404).json({ exito: false, mensaje: 'Turno no encontrado' });
+    }
+    if (estado.asignacionActual) {
+      await transaction.rollback();
+      return res.status(409).json({ exito: false, mensaje: 'El empleado ya tiene asignado ese departamento y turno' });
+    }
 
     await new sql.Request(transaction)
       .input('idEmpleado', sql.Int, idEmpleado)
+      .input('fechaFin', sql.Date, fechaInicio || new Date())
       .query(`
         UPDATE HumanResources.EmployeeDepartmentHistory
-        SET EndDate = GETDATE(), ModifiedDate = GETDATE()
+        SET EndDate = @fechaFin, ModifiedDate = GETDATE()
         WHERE BusinessEntityID = @idEmpleado AND EndDate IS NULL
       `);
 
@@ -139,11 +190,13 @@ const asignarEmpleado = asyncHandler(async (req, res) => {
       .input('idEmpleado', sql.Int, idEmpleado)
       .input('idDepartamento', sql.SmallInt, idDepartamento)
       .input('idTurno', sql.TinyInt, idTurno)
+      .input('fechaInicio', sql.Date, fechaInicio || new Date())
+      .input('fechaFin', sql.Date, fechaFin || null)
       .query(`
         INSERT INTO HumanResources.EmployeeDepartmentHistory
-          (BusinessEntityID, DepartmentID, ShiftID, StartDate, ModifiedDate)
+          (BusinessEntityID, DepartmentID, ShiftID, StartDate, EndDate, ModifiedDate)
         VALUES
-          (@idEmpleado, @idDepartamento, @idTurno, GETDATE(), GETDATE())
+          (@idEmpleado, @idDepartamento, @idTurno, @fechaInicio, @fechaFin, GETDATE())
       `);
 
     await transaction.commit();
@@ -152,6 +205,68 @@ const asignarEmpleado = asyncHandler(async (req, res) => {
     await transaction.rollback();
     throw error;
   }
+});
+
+// PUT /api/departamentos/:id/asignaciones/:idEmpleado
+const actualizarAsignacion = asyncHandler(async (req, res) => {
+  const { idTurno, fechaInicio, fechaFin } = req.body;
+  const idDepartamento = req.params.id;
+  const idEmpleado = req.params.idEmpleado;
+
+  if (!idTurno) {
+    return res.status(400).json({ exito: false, mensaje: 'idTurno es obligatorio' });
+  }
+  if (!esFechaISOValida(fechaInicio) || !esFechaISOValida(fechaFin)) {
+    return res.status(400).json({ exito: false, mensaje: 'Las fechas deben tener el formato YYYY-MM-DD' });
+  }
+  if (fechaInicio && fechaFin && fechaFin < fechaInicio) {
+    return res.status(400).json({ exito: false, mensaje: 'La fecha de fin no puede ser anterior a la fecha de inicio' });
+  }
+
+  const pool = await getPool();
+  const resultado = await pool.request()
+    .input('idEmpleado', sql.Int, idEmpleado)
+    .input('idDepartamento', sql.SmallInt, idDepartamento)
+    .input('idTurno', sql.TinyInt, idTurno)
+    .input('fechaInicio', sql.Date, fechaInicio || null)
+    .input('fechaFin', sql.Date, fechaFin || null)
+    .query(`
+      UPDATE edh
+      SET ShiftID = @idTurno,
+          StartDate = COALESCE(@fechaInicio, StartDate),
+          EndDate = @fechaFin,
+          ModifiedDate = GETDATE()
+      FROM HumanResources.EmployeeDepartmentHistory edh
+      WHERE edh.BusinessEntityID = @idEmpleado
+        AND edh.DepartmentID = @idDepartamento
+        AND edh.EndDate IS NULL
+        AND EXISTS (SELECT 1 FROM HumanResources.Shift WHERE ShiftID = @idTurno)
+    `);
+
+  if (resultado.rowsAffected[0] === 0) {
+    return res.status(404).json({ exito: false, mensaje: 'Asignación activa no encontrada o turno inválido' });
+  }
+  res.json({ exito: true, mensaje: 'Asignación actualizada correctamente' });
+});
+
+// DELETE /api/departamentos/:id/asignaciones/:idEmpleado
+const eliminarAsignacion = asyncHandler(async (req, res) => {
+  const pool = await getPool();
+  const resultado = await pool.request()
+    .input('idEmpleado', sql.Int, req.params.idEmpleado)
+    .input('idDepartamento', sql.SmallInt, req.params.id)
+    .query(`
+      UPDATE HumanResources.EmployeeDepartmentHistory
+      SET EndDate = GETDATE(), ModifiedDate = GETDATE()
+      WHERE BusinessEntityID = @idEmpleado
+        AND DepartmentID = @idDepartamento
+        AND EndDate IS NULL
+    `);
+
+  if (resultado.rowsAffected[0] === 0) {
+    return res.status(404).json({ exito: false, mensaje: 'Asignación activa no encontrada' });
+  }
+  res.json({ exito: true, mensaje: 'Asignación cerrada correctamente' });
 });
 
 // POST /api/departamentos
@@ -212,6 +327,8 @@ module.exports = {
   obtenerDepartamento,
   listarEmpleadosDelDepartamento,
   asignarEmpleado,
+  actualizarAsignacion,
+  eliminarAsignacion,
   crearDepartamento,
   actualizarDepartamento,
   eliminarDepartamento,
