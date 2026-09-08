@@ -8,8 +8,8 @@ const listarTurnos = asyncHandler(async (req, res) => {
     SELECT
       s.ShiftID AS idTurno,
       s.Name AS nombre,
-      s.StartTime AS horaInicio,
-      s.EndTime AS horaFin,
+      CONVERT(varchar(8), s.StartTime, 108) AS horaInicio,
+      CONVERT(varchar(8), s.EndTime, 108) AS horaFin,
       COUNT(DISTINCT CASE WHEN edh.EndDate IS NULL THEN edh.BusinessEntityID END) AS totalEmpleadosAsignados
     FROM HumanResources.Shift s
     LEFT JOIN HumanResources.EmployeeDepartmentHistory edh ON edh.ShiftID = s.ShiftID
@@ -25,7 +25,15 @@ const obtenerTurno = asyncHandler(async (req, res) => {
   const resultado = await pool
     .request()
     .input('id', sql.TinyInt, req.params.id)
-    .query('SELECT ShiftID AS idTurno, Name AS nombre, StartTime AS horaInicio, EndTime AS horaFin FROM HumanResources.Shift WHERE ShiftID = @id');
+    .query(`
+      SELECT
+        ShiftID AS idTurno,
+        Name AS nombre,
+        CONVERT(varchar(8), StartTime, 108) AS horaInicio,
+        CONVERT(varchar(8), EndTime, 108) AS horaFin
+      FROM HumanResources.Shift
+      WHERE ShiftID = @id
+    `);
 
   if (resultado.recordset.length === 0) {
     return res.status(404).json({ exito: false, mensaje: 'Turno no encontrado' });
